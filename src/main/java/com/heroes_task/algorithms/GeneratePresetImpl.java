@@ -7,20 +7,17 @@ import com.battle.heroes.army.programs.GeneratePreset;
 import java.util.*;
 
 public class GeneratePresetImpl implements GeneratePreset {
-
-    private static final int FIELD_WIDTH = 3;      // зона врага слева
-    private static final int FIELD_HEIGHT = 21;
-    private static final int MAX_PER_TYPE = 11;
+    private static final int HEIGHT = 21;
+    private static final int WIDTH = 3;
+    private static final int TYPE_LIMIT = 11;
 
     private final Random rng = new Random();
 
     @Override
     public Army generate(List<Unit> unitList, int maxPoints) {
-        // Не мутируем входной список (иногда это важно для тестов/движка)
         List<Unit> templates = new ArrayList<>(unitList);
         templates.sort(byEfficiency());
 
-        // Готовим уникальные клетки под расстановку
         List<Cell> spawnCells = buildSpawnCells();
         Collections.shuffle(spawnCells, rng);
         Iterator<Cell> cellIt = spawnCells.iterator();
@@ -35,10 +32,10 @@ public class GeneratePresetImpl implements GeneratePreset {
             if (remaining <= 0 || !cellIt.hasNext()) break;
 
             int cost = template.getCost();
-            if (cost <= 0) continue; // защита от странных данных
+            if (cost <= 0) continue;
 
             int affordable = remaining / cost;
-            int unitsToCreate = Math.min(MAX_PER_TYPE, affordable);
+            int unitsToCreate = Math.min(TYPE_LIMIT, affordable);
 
             for (int i = 0; i < unitsToCreate && cellIt.hasNext(); i++) {
                 Cell cell = cellIt.next();
@@ -59,7 +56,6 @@ public class GeneratePresetImpl implements GeneratePreset {
                         cell.y
                 );
 
-                // КРИТИЧНО: переносим программу поведения, иначе unit.getProgram() будет null
                 unit.setProgram(template.getProgram());
 
                 resultUnits.add(unit);
@@ -88,9 +84,9 @@ public class GeneratePresetImpl implements GeneratePreset {
     }
 
     private List<Cell> buildSpawnCells() {
-        List<Cell> cells = new ArrayList<>(FIELD_WIDTH * FIELD_HEIGHT);
-        for (int x = 0; x < FIELD_WIDTH; x++) {
-            for (int y = 0; y < FIELD_HEIGHT; y++) {
+        List<Cell> cells = new ArrayList<>(WIDTH * HEIGHT);
+        for (int x = 0; x < WIDTH; x++) {
+            for (int y = 0; y < HEIGHT; y++) {
                 cells.add(new Cell(x, y));
             }
         }

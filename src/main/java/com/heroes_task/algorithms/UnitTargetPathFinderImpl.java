@@ -5,131 +5,150 @@ import com.battle.heroes.army.programs.Edge;
 import com.battle.heroes.army.programs.UnitTargetPathFinder;
 
 import java.util.*;
-
 public class UnitTargetPathFinderImpl implements UnitTargetPathFinder {
+    private static final int[] X_DIRECTIONS = {-1, -1, -1,  0, 0,  1, 1, 1};
+    private static final int[] Y_DIRECTIONS = {-1,  0,  1, -1, 1, -1, 0, 1};
 
-    private static final int FIELD_WIDTH = 27;
-    private static final int FIELD_HEIGHT = 21;
+    private static final int H = 21;
+    private static final int W = 27;
 
-    // 8 направлений (включая диагонали)
-    private static final int[] DIR_X = {-1, -1, -1,  0, 0,  1, 1, 1};
-    private static final int[] DIR_Y = {-1,  0,  1, -1, 1, -1, 0, 1};
+    private static final int INF = Integer.MAX_VALUE;
+    private static final int NO_PARENT = -1;
 
     @Override
     public List<Edge> getTargetPath(Unit attackUnit, Unit targetUnit, List<Unit> existingUnitList) {
-        if (attackUnit == null || targetUnit == null) return new ArrayList<>();
+        if (attackUnit == null || targetUnit == null) return Collections.emptyList();
 
         final int startX = attackUnit.getxCoordinate();
+        final int targetX = targetUnit.getxCoordinate();
         final int startY = attackUnit.getyCoordinate();
-        final int goalX = targetUnit.getxCoordinate();
-        final int goalY = targetUnit.getyCoordinate();
+        final int targetY = targetUnit.getyCoordinate();
 
-        if (!inBounds(startX, startY) || !inBounds(goalX, goalY)) return new ArrayList<>();
-        if (startX == goalX && startY == goalY) {
-            List<Edge> sameCell = new ArrayList<>();
-            sameCell.add(new Edge(startX, startY));
-            return sameCell;
+        if (!inside(startX, startY) || !inside(targetX, targetY)) return Collections.emptyList();
+
+        if (startX == targetX && startY == targetY) {
+            return List.of(new Edge(startX, startY));
         }
 
-        // blocked[x][y] == true означает препятствие
-        boolean[][] blocked = new boolean[FIELD_WIDTH][FIELD_HEIGHT];
-        if (existingUnitList != null) {
-            for (Unit u : existingUnitList) {
-                if (u == null || !u.isAlive()) continue;
-                // старт и цель не считаем препятствиями
-                if (u == attackUnit || u == targetUnit) continue;
+        final int start = idx(startX, startY);
+        final int goal = idx(targetX, targetY);
 
-                int x = u.getxCoordinate();
-                int y = u.getyCoordinate();
-                if (inBounds(x, y)) blocked[x][y] = true;
-            }
-        }
+        boolean[] blocked = buildBlocked(existingUnitList, attackUnit, targetUnit);
 
-        // gScore[x][y] — стоимость пути от старта до клетки
-        int[][] gScore = new int[FIELD_WIDTH][FIELD_HEIGHT];
-        for (int[] col : gScore) Arrays.fill(col, Integer.MAX_VALUE);
+        blocked[start] = false;
+        blocked[goal] = false;
 
-        // parent[x][y] — предыдущая клетка на кратчайшем пути
-        Edge[][] parent = new Edge[FIELD_WIDTH][FIELD_HEIGHT];
+        int[] gScore = new int[W * H];
+        Arrays.fill(gScore, INF);
 
-        boolean[][] closed = new boolean[FIELD_WIDTH][FIELD_HEIGHT];
+        int[] parent = new int[W * H];
+        Arrays.fill(parent, NO_PARENT);
 
-        PriorityQueue<SearchNode> openSet = new PriorityQueue<>();
-        gScore[startX][startY] = 0;
-        openSet.add(new SearchNode(startX, startY, chebyshevDistance(startX, startY, goalX, goalY)));
+        boolean[] closed = new boolean[W * H];
 
-        while (!openSet.isEmpty()) {
-            SearchNode current = openSet.poll();
-            int cx = current.x;
-            int cy = current.y;
+        PriorityQueue<QItem> open = new PriorityQueue<>(Comparator.comparingInt(a -> a.f));
+        gScore[start] = 0;
+        open.add(new QItem(start, simplification(startX, startY, targetX, targetY)));
 
-            if (closed[cx][cy]) continue;
-            closed[cx][cy] = true;
+        while (!open.isEmpty()) {
+            QItem cur = open.poll();
+            int curIdx = cur.cell;
 
-            if (cx == goalX && cy == goalY) break;
+            if (closed[curIdx]) continue;
+            closed[curIdx] = true;
 
-            for (int i = 0; i < 8; i++) {
-                int nx = cx + DIR_X[i];
-                int ny = cy + DIR_Y[i];
+            if (curIdx == goal) break;
 
-                if (!inBounds(nx, ny)) continue;
-                if (blocked[nx][ny]) continue;
-                if (closed[nx][ny]) continue;
+            int cx = x(curIdx);
+            int cy = y(curIdx);
 
-                int tentativeG = gScore[cx][cy] + 1;
-                if (tentativeG < gScore[nx][ny]) {
-                    gScore[nx][ny] = tentativeG;
-                    parent[nx][ny] = new Edge(cx, cy);
+            int baseG = gScore[curIdx];
+            if (baseG == INF) continue;
 
-                    int fScore = tentativeG + chebyshevDistance(nx, ny, goalX, goalY);
-                    openSet.add(new SearchNode(nx, ny, fScore));
+            for (int k = 0; k < 8; k++) {
+                int nx = cx + X_DIRECTIONS[k];
+                int ny = cy + Y_DIRECTIONS[k];
+
+                if (!inside(nx, ny)) continue;
+
+                int nIdx = idx(nx, ny);
+                if (blocked[nIdx] || closed[nIdx]) continue;
+
+                int tentative = baseG + 1;
+                if (tentative < gScore[nIdx]) {
+                    gScore[nIdx] = tentative;
+                    parent[nIdx] = curIdx;
+
+                    int f = tentative + simplification(nx, ny, targetX, targetY);
+                    open.add(new QItem(nIdx, f));
                 }
             }
         }
 
-        return restorePath(parent, startX, startY, goalX, goalY);
+        return reconstruct(parent, start, goal);
     }
 
-    private static List<Edge> restorePath(Edge[][] parent, int startX, int startY, int goalX, int goalY) {
-        List<Edge> path = new ArrayList<>();
-        int x = goalX, y = goalY;
+    private static boolean[] buildBlocked(List<Unit> units, Unit attacker, Unit target) {
+        boolean[] blocked = new boolean[W * H];
+        if (units == null) return blocked;
 
-        while (!(x == startX && y == startY)) {
-            path.add(new Edge(x, y));
-            Edge p = parent[x][y];
-            if (p == null) return new ArrayList<>(); // пути нет
-            x = p.getX();
-            y = p.getY();
+        for (Unit u : units) {
+            if (u == null || !u.isAlive()) continue;
+            if (u == attacker || u == target) continue;
+
+            int x = u.getxCoordinate();
+            int y = u.getyCoordinate();
+            if (!inside(x, y)) continue;
+
+            blocked[idx(x, y)] = true;
+        }
+        return blocked;
+    }
+
+    private static List<Edge> reconstruct(int[] parent, int start, int goal) {
+        if (goal != start && parent[goal] == NO_PARENT) return Collections.emptyList();
+
+        ArrayList<Edge> rev = new ArrayList<>();
+        int cur = goal;
+
+        while (cur != start) {
+            rev.add(new Edge(x(cur), y(cur)));
+            cur = parent[cur];
+            if (cur == NO_PARENT) return Collections.emptyList();
         }
 
-        path.add(new Edge(startX, startY));
-        Collections.reverse(path);
-        return path;
+        rev.add(new Edge(x(start), y(start)));
+        Collections.reverse(rev);
+        return rev;
     }
 
-    // Для 8-направленного движения с одинаковой ценой шага подходит эвристика Чебышёва
-    private static int chebyshevDistance(int x, int y, int tx, int ty) {
+    private static int simplification(int x, int y, int tx, int ty) {
         return Math.max(Math.abs(tx - x), Math.abs(ty - y));
     }
 
-    private static boolean inBounds(int x, int y) {
-        return x >= 0 && x < FIELD_WIDTH && y >= 0 && y < FIELD_HEIGHT;
+    private static boolean inside(int x, int y) {
+        return x >= 0 && x < W && y >= 0 && y < H;
     }
 
-    private static class SearchNode implements Comparable<SearchNode> {
-        final int x;
-        final int y;
+    private static int idx(int x, int y) {
+        return y * W + x;
+    }
+
+    private static int x(int idx) {
+        return idx % W;
+    }
+
+    private static int y(int idx) {
+        return idx / W;
+    }
+
+    private static final class QItem {
+        final int cell;
         final int f;
 
-        SearchNode(int x, int y, int f) {
-            this.x = x;
-            this.y = y;
+        QItem(int cell, int f) {
+            this.cell = cell;
             this.f = f;
-        }
-
-        @Override
-        public int compareTo(SearchNode other) {
-            return Integer.compare(this.f, other.f);
         }
     }
 }

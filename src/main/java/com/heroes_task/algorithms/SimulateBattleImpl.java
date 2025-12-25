@@ -9,7 +9,6 @@ import java.util.*;
 
 public final class SimulateBattleImpl implements SimulateBattle {
 
-    // важно для reflection
     private PrintBattleLog printBattleLog;
 
     @Override
@@ -18,17 +17,15 @@ public final class SimulateBattleImpl implements SimulateBattle {
 
         List<Unit> playerUnits = playerArmy.getUnits();
         List<Unit> computerUnits = computerArmy.getUnits();
+
         if (playerUnits == null || computerUnits == null) return;
 
-        while (hasAlive(playerUnits) && hasAlive(computerUnits)) {
-
-            // очередь раунда: каждый живой максимум 1 раз
+        while (isAliveCheck(playerUnits) && isAliveCheck(computerUnits)) {
             Deque<Unit> playerQueue = buildSortedRoundQueue(playerUnits);
             Deque<Unit> computerQueue = buildSortedRoundQueue(computerUnits);
 
             boolean anyAttackThisRound = false;
 
-            // чередование ходов, пока у кого-то ещё есть ходящие в этом раунде
             while (!playerQueue.isEmpty() || !computerQueue.isEmpty()) {
 
                 anyAttackThisRound |= actOne(playerQueue);
@@ -36,14 +33,8 @@ public final class SimulateBattleImpl implements SimulateBattle {
 
                 anyAttackThisRound |= actOne(computerQueue);
                 if (Thread.interrupted()) throw new InterruptedException();
-
-                // ВАЖНО: бой по требованиям заканчивается, когда армия не имеет живых,
-                // но "хвост раунда" другой армии мы уже доигрываем этим циклом,
-                // потому что очереди на раунд уже построены.
-                // Поэтому тут НЕ нужно break при смерти армии.
             }
 
-            // Если за целый раунд никто не смог атаковать — дальше смысла нет
             if (!anyAttackThisRound) return;
         }
     }
@@ -58,7 +49,14 @@ public final class SimulateBattleImpl implements SimulateBattle {
             if (printBattleLog != null) {
                 printBattleLog.printBattleLog(attacker, target);
             }
-            return target != null; // был ли успешный удар
+            return target != null;
+        }
+        return false;
+    }
+
+    private static boolean isAliveCheck(List<Unit> units) {
+        for (Unit u : units) {
+            if (u != null && u.isAlive()) return true;
         }
         return false;
     }
@@ -84,12 +82,5 @@ public final class SimulateBattleImpl implements SimulateBattle {
         } catch (Throwable ignored) {
             return null;
         }
-    }
-
-    private static boolean hasAlive(List<Unit> units) {
-        for (Unit u : units) {
-            if (u != null && u.isAlive()) return true;
-        }
-        return false;
     }
 }
